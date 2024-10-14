@@ -216,57 +216,64 @@ let fetchins (m:mach) (addr:quad) : ins =
 
 let fetch_ins = fetchins
 
-(* Compute the instruction result.
- * NOTE: See int64_overflow.ml for the definition of the return type
-*  Int64_overflow.t. *)
-let interp_opcode (m: mach) (o:opcode) (args:int64 list) : Int64_overflow.t = 
-    let open Int64 in
-    let open Int64_overflow in
-    match o, args with
-      | _ -> failwith "interp_opcode not implemented"
+(* WARNING: I have no fucking idea why we have these functions here. *)
 
-(** Update machine state with instruction results. *)
-let ins_writeback (m: mach) : ins -> int64 -> unit  = 
-  failwith "ins_writeback not implemented"
-
-
-(* mem addr ---> mem array index *)
-let interp_operands (m:mach) : ins -> int64 list = 
-  failwith "interp_operands not implemented"
-
-let validate_operands : ins -> unit = function
-  | _ -> failwith "validate_operands not implemented"
+(* (* Compute the instruction result. *)
+(*  * NOTE: See int64_overflow.ml for the definition of the return type *)
+(* *  Int64_overflow.t. *) *)
+(* let interp_opcode (m: mach) (o:opcode) (args:int64 list) : Int64_overflow.t =  *)
+(*     let open Int64 in *)
+(*     let open Int64_overflow in *)
+(*     match o, args with *)
+(*       | _ -> failwith "interp_opcode not implemented" *)
+(**)
+(* (** Update machine state with instruction results. *) *)
+(* let ins_writeback (m: mach) : ins -> int64 -> unit  =  *)
+(*   failwith "ins_writeback not implemented" *)
 
 
-let crack : ins -> ins list = function
-  | _ -> failwith "crack not implemented"
+(* (* mem addr ---> mem array index *) *)
+(* let interp_operands (m:mach) : ins -> int64 list =  *)
+(*   failwith "interp_operands not implemented" *)
+(**)
+(* let validate_operands : ins -> unit = function *)
+(*   | _ -> failwith "validate_operands not implemented" *)
+(**)
+(**)
+(* let crack : ins -> ins list = function *)
+(*   | _ -> failwith "crack not implemented" *)
+(**)
+(*   *)
+(* (* TODO: double check against spec *) *)
+(* let set_flags (m:mach) (op:opcode) (ws: quad list) (w : Int64_overflow.t) : unit = *)
+(*   failwith "set_flags not implemented" *)
 
- 
-(* TODO: double check against spec *)
-let set_flags (m:mach) (op:opcode) (ws: quad list) (w : Int64_overflow.t) : unit =
-  failwith "set_flags not implemented"
+(* let step (m:mach) : unit = *)
+(*   (* execute an instruction *) *)
+(*   let (op, args) as ins = fetch_ins m m.regs.(rind Rip) in *)
+(*   validate_operands ins; *)
+(*    *)
+(*   (* Some instructions involve running two or more basic instructions.  *)
+(*    * For other instructions, just return a list of one instruction. *)
+(*    * See the X86lite specification for details. *) *)
+(*   let uops: ins list = crack (op,args) in *)
+(**)
+(*   m.regs.(rind Rip) <- m.regs.(rind Rip) +. ins_size; *)
+(**)
+(*   List.iter *)
+(*     (fun (uop,_ as u) -> *)
+(*      if !debug_simulator then print_endline @@ string_of_ins u; *)
+(*      let ws = interp_operands m u in *)
+(*      let res = interp_opcode m uop ws in *)
+(*      ins_writeback m u @@ res.Int64_overflow.value; *)
+(*      set_flags m op ws res *)
+(*     ) uops *)
+
+(* WARNING: Do it my way. *)
 
 let step (m:mach) : unit =
-  (* execute an instruction *)
-  let (op, args) as ins = fetchins m m.regs.(rind Rip) in
-  validate_operands ins;
+  () (* TODO: implement this *)
   
-  (* Some instructions involve running two or more basic instructions. 
-   * For other instructions, just return a list of one instruction.
-   * See the X86lite specification for details. *)
-  let uops: ins list = crack (op,args) in
-
-  m.regs.(rind Rip) <- m.regs.(rind Rip) +. ins_size;
-
-  List.iter
-    (fun (uop,_ as u) ->
-     if !debug_simulator then print_endline @@ string_of_ins u;
-     let ws = interp_operands m u in
-     let res = interp_opcode m uop ws in
-     ins_writeback m u @@ res.Int64_overflow.value;
-     set_flags m op ws res
-    ) uops
-
 (* Runs the machine until the rip register reaches a designated
    memory address. Returns the contents of %rax when the 
    machine halts. *)
