@@ -242,12 +242,14 @@ let set_dest_val (m: mach) (dst: operand) (value: int64) : unit =
 
 exception Invalid_operands
 (* Raise Invalid_operands if given invalid operand(s) for this instruction. *)
+(* TODO: check the comments in doc *)
 let validate_operands : ins -> unit = function
   | Imulq, [_; Reg _]
   | Sarq, [Imm _; _] | Sarq, [Reg Rcx; _]
   | Shlq, [Imm _; _] | Shlq, [Reg Rcx; _]
   | Shrq, [Imm _; _] | Shrq, [Reg Rcx; _]
   | Leaq, [Ind1 _; _] | Leaq, [Ind2 _; _] | Leaq, [Ind3 _; _]
+  | Cmpq, [_; Ind1 _] | Cmpq, [_; Ind2 _] | Cmpq, [_; Ind3 _]
     -> ()
   | Imulq, _
   | Sarq, _
@@ -262,6 +264,7 @@ let validate_operands : ins -> unit = function
 let rec crack : ins -> ins list = function
   | Pushq, [src] -> [Subq, [Imm (Lit 8L); Reg Rsp]; Movq, [src; Ind2 Rsp]]
   | Popq, [dst] -> [Movq, [Ind2 Rsp; dst]; Addq, [Imm (Lit 8L); Reg Rsp]]
+  | Jmp, [src] -> [Movq, [src; Reg Rip]]
   | Callq, [src] -> crack (Pushq, [Reg Rip]) @ [Movq, [src; Reg Rip]]
   | Retq, [] -> crack (Popq, [Reg Rip])
   | insn -> [insn]
@@ -270,14 +273,14 @@ let rec crack : ins -> ins list = function
 (* Note: In the simulator, instruction operands will not contain labels. *)
 let interp_operands (m: mach) : ins -> int64 list =
   let interp_val = interp_val m in
+  let interp_ind = interp_ind m in
   function
   | Set _, _ -> []
-  | Leaq, [ind; _] -> [interp_ind m ind]
+  | Leaq, [ind; _] -> [interp_ind ind]
   | Movq, [src; _] -> [interp_val src]
   | Popq, _ -> []
-  | Jmp, [src] -> [interp_val src]
   | J _, [src] -> [interp_val src]
-  | _, args -> List.map interp_val args
+  | _, operands -> List.map interp_val operands
 
 exception Invalid_operator
 
@@ -308,51 +311,87 @@ let interp_opcode (m: mach) (op: opcode) (args: int64 list) : Int64_overflow.t =
   | Movq, [src] -> src |> ok (* TODO: change ok to another name? *)
 
   | Cmpq, [src1; src2] -> sub src2 src1 (* TODO: what do i do? *)
-  | Jmp, [src] -> src |> ok
   | J cc, [src] -> src |> ok
 
   | _ -> raise Invalid_operator
 
 (* Update machine state with instruction results. *)
 let ins_writeback (m: mach) : ins -> int64 -> unit =
-let set_dest_val = set_dest_val m in
-function
+  let set_dest_val = set_dest_val m in
+  function
   | Negq, [dst] | Addq, [_; dst] | Subq, [_; dst] -> set_dest_val dst
   | Imulq, [_; reg] -> set_dest_val reg
   | Incq, [dst] | Decq, [dst] -> set_dest_val dst
   | Notq, [dst] | Andq, [_; dst]
   | Orq, [_; dst] | Xorq, [_; dst] -> set_dest_val dst
   | Sarq, [_; dst] | Shlq, [_; dst] | Shrq, [_; dst] -> set_dest_val dst
-  | Set cc, [dst] -> set_dest_val dst (* TODO: correct this *)
-  | Leaq, [_; dst] 
-  | Movq, [_; dst] -> set_dest_val dst
+  | Set cc, [dst] -> fun b -> set_dest_val dst (Int64.logor b (Int64.logand (interp_val m dst) 0xFFFFFFFFFFFFFF00L))
+  | Leaq, [_; dst] | Movq, [_; dst] -> set_dest_val dst
   | Cmpq, _ -> fun _ -> () (* TODO: what do i do? *)
-  | Jmp, [_] -> set_dest_val (Reg Rip)
-  | J cc, [src] -> if interp_cnd m.flags cc then set_dest_val (Reg Rip) else fun _ -> ()
+  | J cc, _ -> if interp_cnd m.flags cc then set_dest_val (Reg Rip) else fun _ -> ()
   | _ -> raise Invalid_operator
+  
+  
+  exception Invalid_argument
+  (* Set the machine flags after an instruction.
+  * See the X86lite specification for details. *)
+  (* NOTE: Pretend that cracking the instructions does not change the behavior of setting flags  *)
+  let set_flags (m: mach) (op: opcode) (args: quad list) (res: Int64_overflow.t) : unit =
+  match op with
+  | Notq | Set _ | Leaq | Movq | J _ -> ()
+  | Sarq | Shlq | Shrq -> 
+    begin
+      match args with
+      | [0L; _] -> ()
+      | [amt; dst] ->
+        begin
+          match op with
+          | Sarq -> begin
+            m.flags.fs <- res.value < 0L;
+            m.flags.fz <- res.value = 0L;
+            if amt = 1L then m.flags.fo <- false
+          end
+          | Shlq -> begin
+            m.flags.fs <- res.value < 0L;
+            m.flags.fz <- res.value = 0L;
+            if amt = 1L then m.flags.fo <- (dst < 0L) != ((Int64.shift_left dst 1) < 0L)
+          end
+          | Shrq -> begin
+            m.flags.fs <- res.value < 0L;
+            if res.value = 0L then m.flags.fz <- true;
+            if amt = 1L then m.flags.fo <- dst < 0L
+          end
+          | _ -> ()
+        end
+      | _ ->
+        raise Invalid_argument
+    end
+  | _ -> 
+    m.flags.fs <- res.value < 0L; 
+    m.flags.fz <- res.value = 0L; 
+    m.flags.fo <- res.overflow
 
-(* Set the machine flags after an instruction.
- * See the X86lite specification for details. *)
-let set_flags (m:mach) (op:opcode) (ws: quad list) (w : Int64_overflow.t) : unit =
-  failwith "set_flags not implemented"
 
 (* Execute an instruction. *)
 let step (m:mach) : unit =
   let rget, rset = rget m, rset m in
 
-  let (op, oprnds) as ins = fetch_ins m (rget Rip) in
-  validate_operands ins;
+  let (op, oprnds) as insn = fetch_ins m (rget Rip) in
+  validate_operands insn;
   let ops: ins list = crack (op, oprnds) in
 
   rset Rip (rget Rip +. ins_size);
 
+  let set_flag : bool = match op with
+    | Pushq | Popq | Jmp | Callq | Retq -> false
+    | _ -> true in
   List.iter
     (fun (op, _ as insn) ->
       if !debug_simulator then print_endline @@ string_of_ins insn;
       let args = interp_operands m insn in
       let res = interp_opcode m op args in
       ins_writeback m insn @@ res.value;
-      set_flags m op args res
+      if set_flag then set_flags m op args res
     ) ops
 
 (* Runs the machine until the rip register reaches a designated
