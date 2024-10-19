@@ -376,6 +376,7 @@ let step (m: mach) : unit =
 
   let (op, oprnds) as insn = fetch_ins m (rget Rip) in
   validate_operands insn;
+  
   let ops: ins list = crack (op, oprnds) in
 
   rset Rip (rget Rip +. ins_size);
@@ -432,13 +433,99 @@ exception Redefined_sym of lbl
   HINT: List.fold_left and List.fold_right are your friends.
  *)
 let is_size (is: ins list): quad = 
-  failwith "is_size not implemented"
-
+  (* Map each instruction to int and sum up *)
+  ?<(List.length is) *. ins_size
+  (* List.fold_left (fun acc (op, oprnds) -> 
+    acc +. ins_size *. ?<(List.length @@ crack @@ (op, oprnds))
+  ) 0L is *)
 let ds_size (ds: data list): quad = 
-  failwith "ds_size not implemented"
+  (* Map each data to int and sum up *)
+  List.fold_left (fun acc -> function
+    | Asciz s -> acc +. 1L +. ?<(String.length s)
+    | Quad _ -> acc +. 8L
+  ) 0L ds
 
+module StringMap = Map.Make(String)
 let assemble (p:prog) : exec =
-  failwith "assemble unimplemented"
+  (* Sort the segments of the program according to the asm type *)
+  let p = List.stable_sort (fun {asm = a1} {asm = a2} -> 
+    match a1, a2 with
+    | Text _, Data _ -> -1
+    | Data _, Text _ -> 1
+    | _ -> 0
+  ) p in
+(* Create symbol table *)
+  let symbol_table, text_end, data_begin = List.fold_left (fun (tbl, addr, sep) elem -> 
+    let size = match elem.asm with
+      | Text is -> is_size is
+      | Data ds -> ds_size ds
+    in 
+    let sep = match sep, elem.asm with
+    | -1L, Data _ -> addr
+    | _ -> sep
+    in
+    if StringMap.mem elem.lbl tbl then 
+      (* Note: No label of the same name is allowed in a single file. 
+         We don't distinguish global and local labels. *)
+      raise (Redefined_sym elem.lbl) 
+    else 
+      (StringMap.add elem.lbl addr tbl, addr +. size, sep)
+  ) (StringMap.empty, mem_bot, -1L) p in
+  (* When there's no data segment, date segment starts at the text_end *)
+  let sep = if data_begin = -1L then text_end else data_begin in
+  (* Replace the labels by Literals *)
+  let p = List.map (fun elem -> 
+    let resolve_oprnd = function
+      | Imm Lbl l -> 
+        begin
+          match StringMap.find_opt l symbol_table with
+          | Some addr -> Imm (Lit addr)
+          | None -> raise (Undefined_sym l)
+        end
+      | Ind1 Lbl l ->
+        begin
+          match StringMap.find_opt l symbol_table with
+          | Some addr -> Ind1 (Lit addr)
+          | None -> raise (Undefined_sym l)
+        end
+      | Ind3 (Lbl l, reg) ->
+        begin
+          match StringMap.find_opt l symbol_table with
+          | Some addr -> Ind3 (Lit addr, reg)
+          | None -> raise (Undefined_sym l)
+        end
+      | x -> x
+    in
+    let resolve_ins = fun (op, oprnds)
+      -> op, List.map resolve_oprnd oprnds
+    in
+    match elem.asm with
+    | Text is -> {elem with asm = Text (List.map resolve_ins is)}
+    | Data ds -> elem
+  ) p in
+  (* Separate the text and data segments *)
+  let text, data = List.partition (fun {asm = a} -> match a with Text _ -> true | _ -> false) p in
+  let text_seg = List.fold_left (
+    fun acc {asm} -> match asm with 
+    | Text is -> acc @ List.concat_map sbytes_of_ins is
+    | Data _ -> raise Invalid_argument
+  ) [] text
+  in
+  let data_seg = List.fold_left (
+    fun acc {asm} -> match asm with 
+    | Data ds -> acc @ List.concat_map sbytes_of_data ds
+    | Text _ -> raise Invalid_argument
+  ) [] data
+  in
+  (* Find the positions of the text and data segments *)
+  let text_pos = mem_bot in
+  let data_pos = sep in
+  (* Find main label *)
+  let entry = match StringMap.find_opt "main" symbol_table with
+  | Some addr -> addr
+  | None -> raise (Undefined_sym "main")
+  in
+  {entry; text_pos; data_pos; text_seg; data_seg}
 
 (* Convert an object file into an executable machine state. 
     - allocate the mem array
