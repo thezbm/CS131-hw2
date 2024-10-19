@@ -454,4 +454,17 @@ let assemble (p:prog) : exec =
   may be of use.
 *)
 let load {entry; text_pos; data_pos; text_seg; data_seg} : mach = 
-   failwith "load not implemented"
+  let mem = (Array.make mem_size (Byte '\x00')) in
+  Array.blit (Array.of_list text_seg) 0 mem (map_addr_safe text_pos) (List.length text_seg);
+  Array.blit (Array.of_list data_seg) 0 mem (map_addr_safe data_pos) (List.length data_seg);
+  let regs = Array.make nregs 0L in
+  regs.(rind Rip) <- entry;
+  regs.(rind Rsp) <- Int64.sub mem_top 8L;
+  let m = { 
+    flags = {fo = false; fs = false; fz = false};
+    regs = regs;
+    mem = mem
+  } in
+  write_quad m (rget m Rsp) exit_addr;
+  m
+  
