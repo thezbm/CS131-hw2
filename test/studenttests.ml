@@ -60,6 +60,66 @@ let test_fetch_ins_invalid = fun () ->
     | Invalid_ins -> ()
     | _ -> failwith "Should have raised Invalid_ins"
 
+let mod_prog a b = [
+  text "mod"
+    [ Cmpq,  [~%Rdi; ~%Rsi]
+    ; J Gt,  [~$$"exit"]
+    ; Subq,  [~%Rsi; ~%Rdi]
+    ; Callq, [~$$"mod"]
+    ; Retq,  []
+    ]
+; text "exit"
+    [ Movq,  [~%Rdi; ~%Rax]
+    ; Retq,  [] 
+    ]
+; gtext "main"
+    [ Movq,  [~$a; ~%Rdi]
+    ; Movq,  [~$b; ~%Rsi]
+    ; Callq, [~$$"mod"]
+    ; Retq,  []
+    ]
+]
+
+let gcd_prog a b = [
+  text "mod"
+    [ Cmpq,  [~%Rdi; ~%Rsi]
+    ; J Gt,  [~$$"mod_exit"]
+    ; Subq,  [~%Rsi; ~%Rdi]
+    ; Callq, [~$$"mod"]
+    ; Retq,  []
+    ]
+; text "mod_exit"
+    [ Movq,  [~%Rdi; ~%Rax]
+    ; Retq,  [] 
+    ]
+; text "gcd"
+    [ Cmpq,  [~$0; ~%Rsi]
+    ; J Eq,  [~$$"gcd_exit"]
+    ; Callq, [~$$"mod"]
+    ; Movq,  [~%Rsi; ~%Rdi]
+    ; Movq,  [~%Rax; ~%Rsi]
+    ; Callq, [~$$"gcd"]
+    ; Retq,  []
+    ]
+; text "gcd_exit"
+    [ Movq,  [~%Rdi; ~%Rax]
+    ; Retq,  [] 
+    ]
+; gtext "main"
+    [ Movq,  [~$a; ~%Rdi]
+    ; Movq,  [~$b; ~%Rsi]
+    ; Callq, [~$$"gcd"]
+    ; Retq,  []
+    ]
+]
+
+(* function gcd(a, b)
+    if b = 0
+        return a
+    else
+        c = a mod b
+        return gcd(b, c) *)
+
 let provided_tests : suite = [
   
   Test ("My Tests", [
@@ -79,7 +139,8 @@ let provided_tests : suite = [
   ]);
 
   Test ("Student-Provided Big Test for Part III: Score recorded as PartIIITestCase", [
-    
+    ("mod", program_test (mod_prog 8 3) 2L);
+    ("gcd", program_test (gcd_prog 24 16) 8L);
   ]);
 
 ] 
