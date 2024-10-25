@@ -242,7 +242,6 @@ let set_dest_val (m: mach) (dst: operand) (value: int64) : unit =
 
 exception Invalid_operands
 (* Raise Invalid_operands if given invalid operand(s) for this instruction. *)
-(* TODO: check the comments in doc *)
 let validate_operands : ins -> unit = function
   | Imulq, [_; Reg _]
   | Sarq, [Imm _; _] | Sarq, [Reg Rcx; _]
@@ -286,7 +285,7 @@ exception Invalid_operator
 
 (* Compute the instruction result. *)
 let interp_opcode (m: mach) (op: opcode) (args: int64 list) : Int64_overflow.t = 
-  let open Int64 in (* TODO: change this for type inference *)
+  let open Int64 in
   let open Int64_overflow in
   match op, args with
 
@@ -297,20 +296,20 @@ let interp_opcode (m: mach) (op: opcode) (args: int64 list) : Int64_overflow.t =
   | Incq, [dst] -> succ dst
   | Decq, [dst] -> pred dst
 
-  | Notq, [dst] -> lognot dst |> ok (* TODO: don't change the flag *)
+  | Notq, [dst] -> lognot dst |> ok
   | Andq, [src; dst] -> logand dst src |> ok
   | Orq, [src; dst] -> logor dst src |> ok
   | Xorq, [src; dst] -> logxor dst src |> ok
 
-  | Sarq, [amt; dst] -> shift_right dst ?>amt |> ok (* TODO: deal with the flags *)
-  | Shlq, [amt; dst] -> shift_left dst ?>amt |> ok (* TODO: deal with the flags *)
-  | Shrq, [amt; dst] -> shift_right_logical dst ?>amt |> ok (* TODO: deal with the flags *)
-  | Set cc, [] -> (if interp_cnd m.flags cc then 1L else 0L) |> ok (* WARNING: WTF should I do to this? *)
+  | Sarq, [amt; dst] -> shift_right dst ?>amt |> ok
+  | Shlq, [amt; dst] -> shift_left dst ?>amt |> ok
+  | Shrq, [amt; dst] -> shift_right_logical dst ?>amt |> ok
+  | Set cc, [] -> (if interp_cnd m.flags cc then 1L else 0L) |> ok
 
   | Leaq, [ind] -> ind |> ok
-  | Movq, [src] -> src |> ok (* TODO: change ok to another name? *)
+  | Movq, [src] -> src |> ok
 
-  | Cmpq, [src1; src2] -> sub src2 src1 (* TODO: what do i do? *)
+  | Cmpq, [src1; src2] -> sub src2 src1
   | J cc, [src] -> src |> ok
 
   | _ -> raise Invalid_operator
@@ -327,7 +326,7 @@ let ins_writeback (m: mach) : ins -> int64 -> unit =
   | Sarq, [_; dst] | Shlq, [_; dst] | Shrq, [_; dst] -> set_dest_val dst
   | Set cc, [dst] -> fun b -> set_dest_val dst (Int64.logor b (Int64.logand (interp_val m dst) 0xFFFFFFFFFFFFFF00L))
   | Leaq, [_; dst] | Movq, [_; dst] -> set_dest_val dst
-  | Cmpq, _ -> fun _ -> () (* TODO: what do i do? *)
+  | Cmpq, _ -> fun _ -> ()
   | J cc, _ -> if interp_cnd m.flags cc then set_dest_val (Reg Rip) else fun _ -> ()
   | _ -> raise Invalid_operator
   
@@ -335,7 +334,6 @@ let ins_writeback (m: mach) : ins -> int64 -> unit =
   exception Invalid_argument
   (* Set the machine flags after an instruction.
   * See the X86lite specification for details. *)
-  (* NOTE: Pretend that cracking the instructions does not change the behavior of setting flags  *)
   let set_flags (m: mach) (op: opcode) (args: quad list) (res: Int64_overflow.t) : unit =
   match op with
   | Notq | Set _ | Leaq | Movq | J _ -> ()
@@ -373,7 +371,7 @@ let ins_writeback (m: mach) : ins -> int64 -> unit =
 
 
 (* Execute an instruction. *)
-let step (m:mach) : unit =
+let step (m: mach) : unit =
   let rget, rset = rget m, rset m in
 
   let (op, oprnds) as insn = fetch_ins m (rget Rip) in
@@ -384,7 +382,8 @@ let step (m:mach) : unit =
 
   let set_flag : bool = match op with
     | Pushq | Popq | Jmp | Callq | Retq -> false
-    | _ -> true in
+    | _ -> true
+  in
   List.iter
     (fun (op, _ as insn) ->
       if !debug_simulator then print_endline @@ string_of_ins insn;
