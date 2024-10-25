@@ -155,9 +155,9 @@ let ( ?< ) = Int64.of_int
 let interp_cnd {fo; fs; fz} : cnd -> bool = function
   | Eq -> fz
   | Neq -> not fz
-  | Lt -> fs != fo
+  | Lt -> fs <> fo
   | Ge -> fs = fo
-  | Le -> (fs != fo) || fz
+  | Le -> (fs <> fo) || fz
   | Gt -> (fs = fo) && not fz
 
 
@@ -352,7 +352,7 @@ let ins_writeback (m: mach) : ins -> int64 -> unit =
           | Shlq -> begin
             m.flags.fs <- res.value < 0L;
             m.flags.fz <- res.value = 0L;
-            if amt = 1L then m.flags.fo <- (dst < 0L) != ((Int64.shift_left dst 1) < 0L)
+            if amt = 1L then m.flags.fo <- (dst < 0L) <> ((Int64.shift_left dst 1) < 0L)
           end
           | Shrq -> begin
             m.flags.fs <- res.value < 0L;
