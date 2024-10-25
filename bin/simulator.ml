@@ -216,29 +216,120 @@ let write_quad = writequad
 let rget (m: mach) (r: reg) : int64 = m.regs.(rind r)
 let rset (m: mach) (r: reg) (i: int64) : unit = m.regs.(rind r) <- i
 
-(* Raise if the instruction is invalid. *)
+exception Invalid_ind_oprnd
+let interp_ind (m: mach) : operand -> quad =
+  let rget = rget m in
+  function
+  | Ind1 Lit i -> i
+  | Ind2 r -> rget r
+  | Ind3 (Lit i, r) -> rget r +. i
+  | _ -> raise Invalid_ind_oprnd
+
+exception Invalid_val_oprnd
+let interp_val (m: mach) (oprnd: operand) : int64 =
+  match oprnd with
+  | Imm Lit i -> i
+  | Reg r -> rget m r
+  | Ind1 _ | Ind2 _ | Ind3 _ -> read_quad m (interp_ind m oprnd)
+  | _ -> raise Invalid_val_oprnd
+
+exception Invalid_dest
+let set_dest_val (m: mach) (dst: operand) (value: int64) : unit =
+  match dst with
+  | Reg r -> rset m r value
+  | Ind1 _ | Ind2 _ | Ind3 _ -> write_quad m (interp_ind m dst) value
+  | _ -> raise Invalid_dest
+
+exception Invalid_operands
+(* Raise Invalid_operands if given invalid operand(s) for this instruction. *)
 let validate_operands : ins -> unit = function
-  | _ -> failwith "validate_operands not implemented"
+  | Imulq, [_; Reg _]
+  | Sarq, [Imm _; _] | Sarq, [Reg Rcx; _]
+  | Shlq, [Imm _; _] | Shlq, [Reg Rcx; _]
+  | Shrq, [Imm _; _] | Shrq, [Reg Rcx; _]
+  | Leaq, [Ind1 _; _] | Leaq, [Ind2 _; _] | Leaq, [Ind3 _; _]
+    -> ()
+  | Imulq, _
+  | Sarq, _
+  | Shlq, _
+  | Shrq, _
+  | Leaq, _
+    -> raise Invalid_operands
+  | _ -> ()
 
 (* Crack the instruction into possibly two or more instructions.
  * See the X86lite specification for details. *)
-let crack : ins -> ins list = function
-  | _ -> failwith "crack not implemented"
+let rec crack : ins -> ins list = function
+  | Pushq, [src] -> [Subq, [Imm (Lit 8L); Reg Rsp]; Movq, [src; Ind2 Rsp]]
+  | Popq, [dst] -> [Movq, [Ind2 Rsp; dst]; Addq, [Imm (Lit 8L); Reg Rsp]]
+  | Callq, [src] -> crack (Pushq, [Reg Rip]) @ [Movq, [src; Reg Rip]]
+  | Retq, [] -> crack (Popq, [Reg Rip])
+  | insn -> [insn]
  
 (* Evaluate the values of operands for computation. *)
-let interp_operands (m:mach) : ins -> int64 list = 
-  failwith "interp_operands not implemented"
+(* Note: In the simulator, instruction operands will not contain labels. *)
+let interp_operands (m: mach) : ins -> int64 list =
+  let interp_val = interp_val m in
+  function
+  | Set _, _ -> []
+  | Leaq, [ind; _] -> [interp_ind m ind]
+  | Movq, [src; _] -> [interp_val src]
+  | Popq, _ -> []
+  | Jmp, [src] -> [interp_val src]
+  | J _, [src] -> [interp_val src]
+  | _, args -> List.map interp_val args
+
+exception Invalid_operator
 
 (* Compute the instruction result. *)
-let interp_opcode (m: mach) (o:opcode) (args:int64 list) : Int64_overflow.t = 
-  let open Int64 in
+let interp_opcode (m: mach) (op: opcode) (args: int64 list) : Int64_overflow.t = 
+  let open Int64 in (* TODO: change this for type inference *)
   let open Int64_overflow in
-  match o, args with
-    | _ -> failwith "interp_opcode not implemented"
+  match op, args with
+
+  | Negq, [dst] -> neg dst
+  | Addq, [src; dst] -> add dst src
+  | Subq, [src; dst] -> sub dst src
+  | Imulq, [src; reg] -> mul reg src
+  | Incq, [dst] -> succ dst
+  | Decq, [dst] -> pred dst
+
+  | Notq, [dst] -> lognot dst |> ok (* TODO: don't change the flag *)
+  | Andq, [src; dst] -> logand dst src |> ok
+  | Orq, [src; dst] -> logor dst src |> ok
+  | Xorq, [src; dst] -> logxor dst src |> ok
+
+  | Sarq, [amt; dst] -> shift_right dst ?>amt |> ok (* TODO: deal with the flags *)
+  | Shlq, [amt; dst] -> shift_left dst ?>amt |> ok (* TODO: deal with the flags *)
+  | Shrq, [amt; dst] -> shift_right_logical dst ?>amt |> ok (* TODO: deal with the flags *)
+  | Set cc, [] -> (if interp_cnd m.flags cc then 1L else 0L) |> ok (* WARNING: WTF should I do to this? *)
+
+  | Leaq, [ind] -> ind |> ok
+  | Movq, [src] -> src |> ok (* TODO: change ok to another name? *)
+
+  | Cmpq, [src1; src2] -> sub src2 src1 (* TODO: what do i do? *)
+  | Jmp, [src] -> src |> ok
+  | J cc, [src] -> src |> ok
+
+  | _ -> raise Invalid_operator
 
 (* Update machine state with instruction results. *)
-let ins_writeback (m: mach) : ins -> int64 -> unit  = 
-  failwith "ins_writeback not implemented"
+let ins_writeback (m: mach) : ins -> int64 -> unit =
+let set_dest_val = set_dest_val m in
+function
+  | Negq, [dst] | Addq, [_; dst] | Subq, [_; dst] -> set_dest_val dst
+  | Imulq, [_; reg] -> set_dest_val reg
+  | Incq, [dst] | Decq, [dst] -> set_dest_val dst
+  | Notq, [dst] | Andq, [_; dst]
+  | Orq, [_; dst] | Xorq, [_; dst] -> set_dest_val dst
+  | Sarq, [_; dst] | Shlq, [_; dst] | Shrq, [_; dst] -> set_dest_val dst
+  | Set cc, [dst] -> set_dest_val dst (* TODO: correct this *)
+  | Leaq, [_; dst] 
+  | Movq, [_; dst] -> set_dest_val dst
+  | Cmpq, _ -> fun _ -> () (* TODO: what do i do? *)
+  | Jmp, [_] -> set_dest_val (Reg Rip)
+  | J cc, [src] -> if interp_cnd m.flags cc then set_dest_val (Reg Rip) else fun _ -> ()
+  | _ -> raise Invalid_operator
 
 (* Set the machine flags after an instruction.
  * See the X86lite specification for details. *)
