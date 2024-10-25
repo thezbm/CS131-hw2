@@ -147,16 +147,27 @@ let ( <. ) a b = (Int64.compare a b) < 0
 let ( >. ) a b = (Int64.compare a b) > 0
 let ( <=. ) a b = (Int64.compare a b) <= 0
 let ( >=. ) a b = (Int64.compare a b) >= 0
+let ( ?> ) = Int64.to_int
+let ( ?< ) = Int64.of_int
 
 (* Interpret a condition code with respect to the given flags. *)
 (* !!! Check the Specification for Help *)
-let interp_cnd {fo; fs; fz} : cnd -> bool = fun x -> failwith "interp_cnd unimplemented"
+let interp_cnd {fo; fs; fz} : cnd -> bool = function
+  | Eq -> fz
+  | Neq -> not fz
+  | Lt -> fs != fo
+  | Ge -> fs = fo
+  | Le -> (fs != fo) || fz
+  | Gt -> (fs = fo) && not fz
 
 
 (* Maps an X86lite address into Some OCaml array index,
    or None if the address is not within the legal address space. *)
 let map_addr (addr:quad) : int option =
-  failwith "map_addr not implemented"
+  if addr >=. mem_bot && addr < mem_top then
+    Some ?>(addr -. mem_bot)
+  else
+    None
 
 (* Your simulator should raise this exception if it tries to read from or
    store to an address not within the valid address space. *)
@@ -164,7 +175,11 @@ exception X86lite_segfault
 
 (* Raise X86lite_segfault when addr is invalid. *)
 let map_addr_segfault (addr:quad) : int =
-  failwith "map_addr_segfault not implemented"
+  match map_addr addr with
+  | None -> raise X86lite_segfault
+  | Some index -> index
+
+let map_addr_safe = map_addr_segfault
 
 (* Simulates one step of the machine:
     - fetch the instruction at %rip
@@ -180,14 +195,26 @@ let map_addr_segfault (addr:quad) : int =
 *)
 
 let readquad (m:mach) (addr:quad) : quad =
-  failwith "readquad not implemented"
+  let index = map_addr_safe addr in
+  int64_of_sbytes Array.(sub m.mem index 8 |> to_list)
 
+let read_quad = readquad
 
 let writequad (m:mach) (addr:quad) (w:quad) : unit =
-  failwith "writequad not implemented"
+  let index = map_addr_safe addr in
+  Array.blit (Array.of_list @@ sbytes_of_int64 @@ w) 0 m.mem index 8
+
+let write_quad = writequad
+
+exception Not_an_ins
 
 let fetchins (m:mach) (addr:quad) : ins =
-  failwith "fetchins not implemented"
+  let index = map_addr_safe addr in
+  match m.mem.(index) with
+    | InsB0 insn -> insn
+    | _ -> raise Not_an_ins
+
+let fetch_ins = fetchins
 
 (* Compute the instruction result.
  * NOTE: See int64_overflow.ml for the definition of the return type

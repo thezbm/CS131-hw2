@@ -44,10 +44,38 @@ let mov_ri =
  InsFrag;
  ]
 
+let read_machine = test_machine
+  ( sbytes_of_int64 0xdeadbeefdeadbeefL
+  @ sbytes_of_int64 0xbeefdeadbeefdeadL
+  )
+
+let write_machine = {read_machine with
+    mem = Array.copy read_machine.mem
+}
+
+let test_fetch_ins_invalid = fun () ->
+  try ignore (fetchins read_machine mem_bot);
+    failwith "Should have raised Not_an_ins"
+  with 
+    | Not_an_ins -> ()
+    | _ -> failwith "Should have raised Not_an_ins"
+
 let provided_tests : suite = [
   
   Test ("My Tests", [
     ("assert", test_my)
+  ]);
+
+  Test ("Student: Read Write Quad Tests", [
+    ("read_quad_1", assert_eq (readquad read_machine mem_bot) 0xdeadbeefdeadbeefL);
+    ("read_quad_2", assert_eq (readquad read_machine (mem_bot +. 8L)) 0xbeefdeadbeefdeadL);
+    ("read_quad_3", assert_eq (readquad read_machine (mem_bot +. 4L)) 0xbeefdeaddeadbeefL);
+    ("write_quad_1", assert_eq ( writequad write_machine (mem_bot +. 4L) 0xfeedadeafbeebeefL
+                               ; readquad write_machine (mem_bot +. 4L)) 0xfeedadeafbeebeefL);
+  ]);
+
+  Test ("Student: Fetch Instruction Invalid", [
+    ("fetch_ins_invalid", test_fetch_ins_invalid)
   ]);
 
   Test ("Student-Provided Big Test for Part III: Score recorded as PartIIITestCase", [
