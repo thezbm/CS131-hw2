@@ -173,12 +173,13 @@ let map_addr (addr:quad) : int option =
    store to an address not within the valid address space. *)
 exception X86lite_segfault
 
-(* Raise X86lite_segfault when addr is invalid. *)
+(* Maps an X86lite address into Some OCaml array index,
+ * or raise X86lite_segfault when addr is not within the
+ * legal address space. *)
 let map_addr_segfault (addr:quad) : int =
   match map_addr addr with
   | None -> raise X86lite_segfault
   | Some index -> index
-
 let map_addr_safe = map_addr_segfault
 
 (* Simulates one step of the machine:
@@ -194,78 +195,74 @@ let map_addr_safe = map_addr_segfault
   are glued together.
 *)
 
+exception Invalid_ins
+let fetchins (m:mach) (addr:quad) : ins =
+  let index = map_addr_safe addr in
+  match m.mem.(index) with
+    | InsB0 insn -> insn
+    | _ -> raise Invalid_ins
+let fetch_ins = fetchins
+
 let readquad (m:mach) (addr:quad) : quad =
   let index = map_addr_safe addr in
   int64_of_sbytes Array.(sub m.mem index 8 |> to_list)
-
 let read_quad = readquad
 
 let writequad (m:mach) (addr:quad) (w:quad) : unit =
   let index = map_addr_safe addr in
   Array.blit (Array.of_list @@ sbytes_of_int64 @@ w) 0 m.mem index 8
-
 let write_quad = writequad
 
-exception Not_an_ins
+let rget (m: mach) (r: reg) : int64 = m.regs.(rind r)
+let rset (m: mach) (r: reg) (i: int64) : unit = m.regs.(rind r) <- i
 
-let fetchins (m:mach) (addr:quad) : ins =
-  let index = map_addr_safe addr in
-  match m.mem.(index) with
-    | InsB0 insn -> insn
-    | _ -> raise Not_an_ins
-
-let fetch_ins = fetchins
-
-(* Compute the instruction result.
- * NOTE: See int64_overflow.ml for the definition of the return type
-*  Int64_overflow.t. *)
-let interp_opcode (m: mach) (o:opcode) (args:int64 list) : Int64_overflow.t = 
-    let open Int64 in
-    let open Int64_overflow in
-    match o, args with
-      | _ -> failwith "interp_opcode not implemented"
-
-(** Update machine state with instruction results. *)
-let ins_writeback (m: mach) : ins -> int64 -> unit  = 
-  failwith "ins_writeback not implemented"
-
-
-(* mem addr ---> mem array index *)
-let interp_operands (m:mach) : ins -> int64 list = 
-  failwith "interp_operands not implemented"
-
+(* Raise if the instruction is invalid. *)
 let validate_operands : ins -> unit = function
   | _ -> failwith "validate_operands not implemented"
 
-
+(* Crack the instruction into possibly two or more instructions.
+ * See the X86lite specification for details. *)
 let crack : ins -> ins list = function
   | _ -> failwith "crack not implemented"
-
  
-(* TODO: double check against spec *)
+(* Evaluate the values of operands for computation. *)
+let interp_operands (m:mach) : ins -> int64 list = 
+  failwith "interp_operands not implemented"
+
+(* Compute the instruction result. *)
+let interp_opcode (m: mach) (o:opcode) (args:int64 list) : Int64_overflow.t = 
+  let open Int64 in
+  let open Int64_overflow in
+  match o, args with
+    | _ -> failwith "interp_opcode not implemented"
+
+(* Update machine state with instruction results. *)
+let ins_writeback (m: mach) : ins -> int64 -> unit  = 
+  failwith "ins_writeback not implemented"
+
+(* Set the machine flags after an instruction.
+ * See the X86lite specification for details. *)
 let set_flags (m:mach) (op:opcode) (ws: quad list) (w : Int64_overflow.t) : unit =
   failwith "set_flags not implemented"
 
+(* Execute an instruction. *)
 let step (m:mach) : unit =
-  (* execute an instruction *)
-  let (op, args) as ins = fetchins m m.regs.(rind Rip) in
-  validate_operands ins;
-  
-  (* Some instructions involve running two or more basic instructions. 
-   * For other instructions, just return a list of one instruction.
-   * See the X86lite specification for details. *)
-  let uops: ins list = crack (op,args) in
+  let rget, rset = rget m, rset m in
 
-  m.regs.(rind Rip) <- m.regs.(rind Rip) +. ins_size;
+  let (op, oprnds) as ins = fetch_ins m (rget Rip) in
+  validate_operands ins;
+  let ops: ins list = crack (op, oprnds) in
+
+  rset Rip (rget Rip +. ins_size);
 
   List.iter
-    (fun (uop,_ as u) ->
-     if !debug_simulator then print_endline @@ string_of_ins u;
-     let ws = interp_operands m u in
-     let res = interp_opcode m uop ws in
-     ins_writeback m u @@ res.Int64_overflow.value;
-     set_flags m op ws res
-    ) uops
+    (fun (op, _ as insn) ->
+      if !debug_simulator then print_endline @@ string_of_ins insn;
+      let args = interp_operands m insn in
+      let res = interp_opcode m op args in
+      ins_writeback m insn @@ res.value;
+      set_flags m op args res
+    ) ops
 
 (* Runs the machine until the rip register reaches a designated
    memory address. Returns the contents of %rax when the 

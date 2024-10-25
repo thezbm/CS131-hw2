@@ -55,10 +55,10 @@ let write_machine = {read_machine with
 
 let test_fetch_ins_invalid = fun () ->
   try ignore (fetchins read_machine mem_bot);
-    failwith "Should have raised Not_an_ins"
+    failwith "Should have raised Invalid_ins"
   with 
-    | Not_an_ins -> ()
-    | _ -> failwith "Should have raised Not_an_ins"
+    | Invalid_ins -> ()
+    | _ -> failwith "Should have raised Invalid_ins"
 
 let provided_tests : suite = [
   
