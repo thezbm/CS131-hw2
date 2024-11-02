@@ -488,6 +488,7 @@ let assemble (p:prog) : exec =
           | Some addr -> Ind1 (Lit addr)
           | None -> raise (Undefined_sym l)
         end
+      (* BUG: This case is not tested and is incorrect for e.g. "movq lbl(%rip)" *)
       | Ind3 (Lbl l, reg) ->
         begin
           match StringMap.find_opt l symbol_table with
